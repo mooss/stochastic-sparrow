@@ -141,37 +141,18 @@ def _parse_event(event: Any, default_channel: int) -> Dict[str, Any]:
     raise ValueError(f"dense: unknown event command {cmd!r} in {event!r}")
 
 
-def _to_delta(msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Sort stably by absolute time and convert to delta times."""
-    result = []
-    last = 0
-    for msg in sorted(msgs, key=lambda m: m["time"]):
-        result.append({**msg, "time": msg["time"] - last})
-        last = msg["time"]
-    return result
-
-
 def dense_to_raw(data: Dict[str, Any]) -> Dict[str, Any]:
     """Convert a dense dictionary into a raw dictionary (see Mir.to_dict)."""
     if "ticks_per_beat" not in data:
         raise ValueError("dense: missing required key 'ticks_per_beat'")
 
-    msgs = []
-    for time_key, events in (data.get("meta_track") or {}).items():
-        try:
-            abs_time = int(time_key)
-        except (TypeError, ValueError):
-            raise ValueError(f"dense: meta_track times must be integers, got {time_key!r}") from None
-        if not isinstance(events, dict):
-            raise ValueError(f"dense: meta_track entry at time {abs_time} must map event types to values")
-        for meta_type, value in events.items():
-            msg = _meta_msg(str(meta_type), value)
-            msg["time"] = abs_time
-            msgs.append(msg)
-    meta_track = _to_delta(msgs)
-    meta_track.append({"type": "end_of_track", "time": 0})
+    if "meta_track" in data:
+        raise ValueError(
+            "dense: 'meta_track' is no longer supported; "
+            "store meta events as a normal track in 'tracks'"
+        )
 
-    tracks = [meta_track]
+    tracks = []
     for track in data.get("tracks") or []:
         if not isinstance(track, dict):
             raise ValueError("dense: each entry of 'tracks' must be a mapping")
@@ -184,36 +165,24 @@ def dense_to_raw(data: Dict[str, Any]) -> Dict[str, Any]:
         msgs.extend(_parse_event(event, default_channel) for event in (track.get("events") or []))
         tracks.append(msgs)
 
-    return {"midi_format": 1, "ticks_per_beat": data["ticks_per_beat"], "tracks": tracks}
+    return {
+        "midi_format": 1,
+        "ticks_per_beat": data["ticks_per_beat"],
+        "tracks": tracks,
+    }
 
 
 def raw_to_dense(data: Dict[str, Any]) -> Dict[str, Any]:
     """Convert a raw dictionary (see Mir.to_dict) into a dense dictionary."""
     if data.get("midi_format", 1) != 1:
-        raise ValueError(f"dense: only MIDI format 1 can be saved as dense, got {data.get('midi_format')}")
+        raise ValueError(
+            f"dense: only MIDI format 1 can be saved as dense, got {data.get('midi_format')}"
+        )
 
     tracks = data.get("tracks") or []
-    meta_track: Dict[int, Dict[str, Any]] = {}
-    abs_time = 0
-    if tracks:
-        for msg in tracks[0]:
-            abs_time += msg["time"]
-            meta_type = msg["type"]
-            if meta_type == "end_of_track":
-                continue
-            if meta_type == "sysex":
-                meta_track.setdefault(abs_time, {})["sysex"] = list(msg["data"])
-                continue
-            attrs = META_ATTRS.get(meta_type)
-            if attrs is None:
-                raise ValueError(f"dense: cannot store unknown meta event type {meta_type!r} in meta_track")
-            value = msg[attrs[0]] if len(attrs) == 1 else [msg[a] for a in attrs]
-            meta_track.setdefault(abs_time, {})[meta_type] = value
-
     return {
         "ticks_per_beat": data["ticks_per_beat"],
-        "meta_track": meta_track,
-        "tracks": [_raw_to_dense_track(track) for track in tracks[1:]],
+        "tracks": [_raw_to_dense_track(track) for track in tracks],
     }
 
 

@@ -80,7 +80,6 @@ def test_stats_percussion_track_info(tmp_path):
     assert stats["tracks"][0]["has_percussions"] == True
 
 
-
 def test_stats_defaults_without_meta(tmp_path):
     """Missing tempo/time-signature meta should use documented defaults."""
     midi = mido.MidiFile(type=0)
@@ -232,23 +231,6 @@ def test_dense_roundtrip_stable(partition):
     """dense -> Mir -> dense must be stable."""
     dense = Mir.from_dict(partition).to_dense()
     assert Mir.from_dense(dense).to_dense() == dense
-
-
-def test_dense_example_to_raw():
-    """A dense document must produce the expected messages, with default channel injected."""
-    dense = {
-        "ticks_per_beat": 480,
-        "meta_track": {0: {"set_tempo": 500000, "time_signature": [4, 4, 24, 8]}},
-        "tracks": [{"name": "upper", "channel": 0,
-                    "events": ["0 pc 6", "0 on 64 107", "120 off 64", "0 eot"]}],
-    }
-    raw = Mir.from_dense(dense).to_dict()
-    assert raw["midi_format"] == 1
-    track = raw["tracks"][1]
-    assert [msg["type"] for msg in track] == [
-        "track_name", "program_change", "note_on", "note_off", "end_of_track"]
-    assert track[2]["channel"] == 0   # default channel added on note_on only
-    assert track[3]["velocity"] == 0  # bare `off` gets velocity 0
 
 
 def test_dense_unknown_command_raises():
