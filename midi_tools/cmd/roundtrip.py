@@ -67,13 +67,13 @@ def _assert_deep_equal(actual, expected, path="<root>"):
         for key in expected:
             if key not in actual:
                 raise RuntimeError(
-                    f"{path}.{key}: missing key, expected {expected[key]!r}"
+                    f"{path}.{key}: missing key '{key}', expected value '{expected[key]!r}'"
                 )
             _assert_deep_equal(actual[key], expected[key], f"{path}.{key}")
         for key in actual:
             if key not in expected:
                 raise RuntimeError(
-                    f"{path}.{key}: unexpected key, got {actual[key]!r}"
+                    f"{path}.{key}: unexpected key '{key}', got value '{actual[key]!r}'"
                 )
     elif isinstance(expected, list) and isinstance(actual, list):
         if len(actual) != len(expected):

@@ -64,23 +64,6 @@ def _int(token: str, event: str) -> int:
         raise ValueError(f"dense: expected an integer, got {token!r} in event {event!r}") from None
 
 
-def _meta_msg(meta_type: str, value: Any) -> Dict[str, Any]:
-    """Build a raw meta message dict (without time) from a dense value."""
-    if meta_type == "end_of_track":
-        raise ValueError("dense: end_of_track is implicit, it cannot be stored in meta_track")
-    attrs = META_ATTRS.get(meta_type)
-    if attrs is None:
-        raise ValueError(f"dense: unknown meta event type {meta_type!r}")
-    if len(attrs) == 1:
-        attr = attrs[0]
-        values = [list(value) if attr == "data" else value]
-    else:
-        if not isinstance(value, list) or len(value) != len(attrs):
-            raise ValueError(f"dense: {meta_type} expects a list of {len(attrs)} values ({', '.join(attrs)}), got {value!r}")
-        values = value
-    return {"type": meta_type, **dict(zip(attrs, values))}
-
-
 def _format_meta_event(time: int, msg: Dict[str, Any]) -> str:
     meta_type = msg["type"]
     attrs = META_ATTRS[meta_type]
@@ -147,23 +130,12 @@ def dense_to_raw(data: Dict[str, Any]) -> Dict[str, Any]:
     if "ticks_per_beat" not in data:
         raise ValueError("dense: missing required key 'ticks_per_beat'")
 
-    if "meta_track" in data:
-        raise ValueError(
-            "dense: 'meta_track' is no longer supported; "
-            "store meta events as a normal track in 'tracks'"
-        )
-
     tracks = []
     for track in data.get("tracks") or []:
         if not isinstance(track, dict):
             raise ValueError("dense: each entry of 'tracks' must be a mapping")
         default_channel = track.get("channel", 0)
-        msgs = []
-        if track.get("name") is not None:
-            msgs.append({"type": "track_name", "name": str(track["name"]), "time": 0})
-        if track.get("instrument_name") is not None:
-            msgs.append({"type": "instrument_name", "name": str(track["instrument_name"]), "time": 0})
-        msgs.extend(_parse_event(event, default_channel) for event in (track.get("events") or []))
+        msgs = [_parse_event(event, default_channel) for event in (track.get("events") or [])]
         tracks.append(msgs)
 
     return {
@@ -188,23 +160,11 @@ def raw_to_dense(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _raw_to_dense_track(track: List[Dict[str, Any]]) -> Dict[str, Any]:
-    name = None
-    instrument_name = None
     default_channel = next((msg["channel"] for msg in track if msg["type"] in CMD_BY_TYPE), 0)
     events = []
     for msg in track:
         time = msg["time"]
         meta_type = msg["type"]
-        if meta_type == "track_name":
-            if name is None:
-                name = msg["name"]
-                continue
-            raise ValueError("dense: cannot store multiple track_name events in one track")
-        if meta_type == "instrument_name":
-            if instrument_name is None:
-                instrument_name = msg["name"]
-                continue
-            raise ValueError("dense: cannot store multiple instrument_name events in one track")
         if meta_type == "end_of_track":
             events.append(f"{time} eot")
         elif meta_type == "sysex":
@@ -226,11 +186,8 @@ def _raw_to_dense_track(track: List[Dict[str, Any]]) -> Dict[str, Any]:
                 events.append(" ".join([str(time), cmd, *(str(msg[a]) for a in attrs)]) + suffix)
         else:
             raise ValueError(f"dense: cannot store {meta_type!r} events in a track")
-    out: Dict[str, Any] = {}
-    if name is not None:
-        out["name"] = name
-    if instrument_name is not None:
-        out["instrument_name"] = instrument_name
-    out["channel"] = default_channel
-    out["events"] = events
+    out: Dict[str, Any] = {
+        "channel": default_channel,
+        "events": events,
+    }
     return out
