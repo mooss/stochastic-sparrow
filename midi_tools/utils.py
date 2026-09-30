@@ -14,9 +14,6 @@ MIDENSE_YAML_EXTENSION = ".midense.yaml"
 MIDI_DEFAULT_TEMPO = 120.0
 MIDI_DEFAULT_TIME_SIGNATURE = "4/4"
 
-# Mark functions as exported.
-__all__ = ["load_mido"]
-
 def load_mido(source: Union[PathLike, io.BytesIO]) -> mido.MidiFile:
     """Open a MIDI file and raise ValueError if its type/format is 2."""
     if isinstance(source, (str, Path)):

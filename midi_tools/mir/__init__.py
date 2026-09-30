@@ -1,7 +1,7 @@
 """MIDI Intermediate Representation (Mir)."""
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, IO, List, Optional
+from typing import Any, Dict, List, Optional
 
 import mido
 import yaml
@@ -176,16 +176,6 @@ class Mir:
             case _:
                 raise ValueError(f"to_disk: cannot deduce Mir format from filename: {path}")
 
-
-    def to_io(self, file: IO, dialect: MirDialect) -> None:
-        """Write this Mir to a file-like object in the given dialect."""
-        match dialect:
-            case MirDialect.MIDI:
-                save_midi(self.to_mido(), file)
-            case MirDialect.RAWYAML:
-                save_midyaml(self.to_dict(), file)
-            case MirDialect.DENSEYAML:
-                save_midyaml(self.to_dense(), file)
 
     ##############
     # Operations #
