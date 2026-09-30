@@ -95,19 +95,20 @@ def _format_meta_event(time: int, msg: Dict[str, Any]) -> str:
 
 def _parse_event(event: Any, default_channel: int) -> Dict[str, Any]:
     """Parse one dense event string into a raw message dict."""
-    tokens = str(event).split()
+    tokens = str(event).split(None, 2)
     if len(tokens) < 2:
         raise ValueError(f"dense: invalid event {event!r}, expected '<time> <command> [args...]'")
     time = _int(tokens[0], event)
     cmd = tokens[1].lower()
-    args = tokens[2:]
+    rest = tokens[2] if len(tokens) > 2 else ""
+    args = rest.split()
 
     if cmd == "eot":
         return {"type": "end_of_track", "time": time}
     if cmd == "sx":
         return {"type": "sysex", "data": [_int(a, event) for a in args], "time": time}
     if cmd in TEXT_CMDS:
-        return {"type": TEXT_CMDS[cmd], "text": " ".join(args), "time": time}
+        return {"type": TEXT_CMDS[cmd], "text": rest, "time": time}
     if cmd in VALUE_CMDS:
         if len(args) != 1:
             raise ValueError(f"dense: command {cmd!r} takes one integer value in event {event!r}")
@@ -116,7 +117,7 @@ def _parse_event(event: Any, default_channel: int) -> Dict[str, Any]:
     if cmd in META_ATTRS:
         attrs = META_ATTRS[cmd]
         if cmd in STRING_META_TYPES:
-            return {"type": cmd, attrs[0]: " ".join(args), "time": time}
+            return {"type": cmd, attrs[0]: rest, "time": time}
         if cmd == "sequencer_specific":
             return {"type": cmd, "data": [_int(a, event) for a in args], "time": time}
         if len(args) != len(attrs):
