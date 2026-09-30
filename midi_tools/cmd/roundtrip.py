@@ -60,12 +60,43 @@ def _assert_midi_equal(actual, expected):
                 )
 
 
+def _assert_deep_equal(actual, expected, path="<root>"):
+    """Recursively compare two dict/list/scalar structures, reporting the exact
+    location and values of the first difference found."""
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        for key in expected:
+            if key not in actual:
+                raise RuntimeError(
+                    f"{path}.{key}: missing key, expected {expected[key]!r}"
+                )
+            _assert_deep_equal(actual[key], expected[key], f"{path}.{key}")
+        for key in actual:
+            if key not in expected:
+                raise RuntimeError(
+                    f"{path}.{key}: unexpected key, got {actual[key]!r}"
+                )
+    elif isinstance(expected, list) and isinstance(actual, list):
+        if len(actual) != len(expected):
+            raise RuntimeError(
+                f"{path}: length differs, expected {len(expected)} but got {len(actual)}"
+            )
+        for index, (a, e) in enumerate(zip(actual, expected)):
+            _assert_deep_equal(a, e, f"{path}[{index}]")
+    else:
+        if type(actual) is not type(expected):
+            raise RuntimeError(
+                f"{path}: type differs, expected {type(expected).__name__} "
+                f"but got {type(actual).__name__}"
+            )
+        if actual != expected:
+            raise RuntimeError(f"{path}: expected {expected!r} but got {actual!r}")
+
+
 def _assert_source_equal(actual, expected, dialect):
     if dialect == MirDialect.MIDI:
         _assert_midi_equal(actual, expected)
     else:
-        if actual != expected:
-            raise RuntimeError(f"{dialect.name} representation differs")
+        _assert_deep_equal(actual, expected)
 
 
 def roundtrip(input_file):
