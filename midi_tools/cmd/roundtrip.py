@@ -1,47 +1,5 @@
 """Roundtrip conversion command."""
-from ..mir import Mir, MirDialect, path_to_dialect
-from ..utils import load_mido
-
-import yaml
-
-def _load_mir_and_baseline(path):
-    dialect = path_to_dialect(path)
-    if dialect is None:
-        raise ValueError(f"cannot deduce Mir format from filename: {path}")
-
-    if dialect == MirDialect.MIDI:
-        midi = load_mido(path)
-        return Mir.from_mido(midi), midi, dialect
-
-    with open(path) as f:
-        baseline = yaml.safe_load(f)
-
-    if dialect == MirDialect.DENSEYAML:
-        return Mir.from_dense(baseline), baseline, dialect
-    if dialect == MirDialect.RAWYAML:
-        return Mir.from_dict(baseline), baseline, dialect
-
-    raise ValueError(f"unsupported dialect: {dialect}")
-
-
-def _roundtrip_via(mir, target):
-    if target == MirDialect.MIDI:
-        return Mir.from_mido(mir.to_mido())
-    if target == MirDialect.DENSEYAML:
-        return Mir.from_dense(mir.to_dense())
-    if target == MirDialect.RAWYAML:
-        return Mir.from_dict(mir.to_dict())
-    raise ValueError(f"unsupported roundtrip target: {target}")
-
-
-def _mir_to_source_repr(mir, dialect):
-    if dialect == MirDialect.MIDI:
-        return mir.to_mido()
-    if dialect == MirDialect.DENSEYAML:
-        return mir.to_dense()
-    if dialect == MirDialect.RAWYAML:
-        return mir.to_dict()
-    raise ValueError(f"unsupported source dialect: {dialect}")
+from ..mir import MirDialect, path_to_dialect, DIALECT_DISPATCH
 
 
 def _assert_midi_equal(actual, expected):
@@ -100,14 +58,21 @@ def _assert_source_equal(actual, expected, dialect):
 
 
 def roundtrip(input_file):
-    source_mir, baseline, source_dialect = _load_mir_and_baseline(input_file)
+    source_dialect = path_to_dialect(input_file)
+    if source_dialect is None:
+        raise ValueError(f"cannot deduce Mir format from filename: {input_file}")
+
+    source_load, source_parse, source_serialize, _ = DIALECT_DISPATCH[source_dialect]
+    baseline = source_load(input_file)
+    source_mir = source_parse(baseline)
 
     for target in (MirDialect.MIDI, MirDialect.DENSEYAML, MirDialect.RAWYAML):
         if target == source_dialect:
             roundtrip_mir = source_mir
         else:
-            roundtrip_mir = _roundtrip_via(source_mir, target)
+            _, target_parse, target_serialize, _ = DIALECT_DISPATCH[target]
+            roundtrip_mir = target_parse(target_serialize(source_mir))
 
-        actual_source_repr = _mir_to_source_repr(roundtrip_mir, source_dialect)
+        actual_source_repr = source_serialize(roundtrip_mir)
         _assert_source_equal(actual_source_repr, baseline, source_dialect)
         print(f"{target.name}: ok")

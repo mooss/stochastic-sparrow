@@ -58,6 +58,11 @@ def save_midyaml(data: Dict[str, Any], destination: FileLike) -> None:
         yaml.safe_dump(data, destination)
 
 
+def _load_yaml(path):
+    with open(path) as f:
+        return yaml.safe_load(f)
+
+
 class Mir:
     """Canonical in-memory MIDI representation used by all operations."""
 
@@ -69,7 +74,6 @@ class Mir:
     @midi_format.setter
     def midi_format(self, value: int) -> None:
         """Set the MIDI file format, converting tracks when changing to format 0."""
-        if value == 2: raise ValueError("MIDI format/type 2 is not supported")
         if value not in (0, 1): raise ValueError(f"Invalid MIDI format {value}, only 0 and 1 are valid and supported")
 
         previous = getattr(self, "_midi_format", None)
@@ -102,17 +106,12 @@ class Mir:
     @classmethod
     def from_disk(cls, path: PathLike) -> "Mir":
         """Load a Mir from a MIDI or YAML file on disk."""
-        match path_to_dialect(path):
-            case MirDialect.MIDI:
-                return Mir.from_mido(load_mido(path))
-            case MirDialect.RAWYAML:
-                with open(path) as f:
-                    return Mir.from_dict(yaml.safe_load(f))
-            case MirDialect.DENSEYAML:
-                with open(path) as f:
-                    return Mir.from_dense(yaml.safe_load(f))
+        dialect = path_to_dialect(path)
+        if dialect is None:
+            raise ValueError(f"from_disk: cannot deduce Mir format from filename: {path}")
 
-        raise ValueError(f"from_disk: cannot deduce Mir format from filename: {path}")
+        load_source, parse_to_mir, _, _ = DIALECT_DISPATCH[dialect]
+        return parse_to_mir(load_source(path))
 
 
     @classmethod
@@ -166,15 +165,12 @@ class Mir:
 
     def to_disk(self, path: PathLike) -> None:
         """Write this Mir to disk as MIDI or YAML based on the file extension."""
-        match path_to_dialect(path):
-            case MirDialect.MIDI:
-                save_midi(self.to_mido(), path)
-            case MirDialect.RAWYAML:
-                save_midyaml(self.to_dict(), path)
-            case MirDialect.DENSEYAML:
-                save_midyaml(self.to_dense(), path)
-            case _:
-                raise ValueError(f"to_disk: cannot deduce Mir format from filename: {path}")
+        dialect = path_to_dialect(path)
+        if dialect is None:
+            raise ValueError(f"to_disk: cannot deduce Mir format from filename: {path}")
+
+        _, _, serialize_from_mir, save_destination = DIALECT_DISPATCH[dialect]
+        save_destination(serialize_from_mir(self), path)
 
 
     ##############
@@ -271,3 +267,11 @@ class Mir:
         for msg in track:
             midi_track.append(msg.copy())
         return midi_track
+
+# Dispatch table for loading, parsing, serializing, and saving each Mir dialect.
+# (load_source, parse_to_mir, serialize_from_mir, save_destination)
+DIALECT_DISPATCH = {
+    MirDialect.MIDI: (load_mido, Mir.from_mido, Mir.to_mido, save_midi),
+    MirDialect.RAWYAML: (_load_yaml, Mir.from_dict, Mir.to_dict, save_midyaml),
+    MirDialect.DENSEYAML: (_load_yaml, Mir.from_dense, Mir.to_dense, save_midyaml),
+}
