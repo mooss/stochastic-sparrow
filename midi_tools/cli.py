@@ -1,4 +1,4 @@
-"""Command-line interface for MIDI<->YAML conversion."""
+"""MIDI tools command-line interface."""
 import argparse
 import sys
 import yaml
@@ -6,7 +6,7 @@ from typing import Optional, Sequence
 
 from .conversion import convert
 from .mir import Mir
-
+from .cmd.roundtrip import roundtrip
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
@@ -27,6 +27,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_stats = sub.add_parser("stats", help="Show statistics for a MIDI file")
     p_stats.add_argument("input_file")
 
+    p_test = sub.add_parser("_test", help=argparse.SUPPRESS)
+    test_sub = p_test.add_subparsers(dest="test_command", required=True)
+    p_test_conv = test_sub.add_parser("conv", help="Run roundtrip conversion tests")
+    p_test_conv.add_argument("input_file")
+
     return parser
 
 
@@ -39,6 +44,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             convert(args.input_file, args.output_file, midi_format=args.format)
         elif args.command == "stats":
             print(yaml.safe_dump(Mir.from_disk(args.input_file).stats()))
+        elif args.command == "_test":
+            if args.test_command == "conv":
+                roundtrip(args.input_file)
     except (ValueError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

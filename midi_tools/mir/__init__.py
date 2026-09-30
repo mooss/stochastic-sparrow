@@ -16,7 +16,7 @@ from midi_tools.utils import (
     MIDRAW_YAML_EXTENSION,
     FileLike,
     PathLike,
-    _load_mido,
+    load_mido,
 )
 
 # MIDI channel 10 is 1-based; mido channel numbers are 0-based.
@@ -104,7 +104,7 @@ class Mir:
         """Load a Mir from a MIDI or YAML file on disk."""
         match path_to_dialect(path):
             case MirDialect.MIDI:
-                return Mir.from_mido(_load_mido(path))
+                return Mir.from_mido(load_mido(path))
             case MirDialect.RAWYAML:
                 with open(path) as f:
                     return Mir.from_dict(yaml.safe_load(f))
