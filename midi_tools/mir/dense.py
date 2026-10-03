@@ -78,6 +78,47 @@ def _format_meta_event(time: int, msg: Dict[str, Any]) -> str:
     return f"{time} {meta_type} " + " ".join(str(v) for v in values)
 
 
+def _parse_value_cmd(cmd: str, args: List[str], time: int, event: Any) -> Dict[str, Any]:
+    if len(args) != 1:
+        raise ValueError(f"dense: command {cmd!r} takes one integer value in event {event!r}")
+    attr = META_ATTRS[VALUE_CMDS[cmd]][0]
+    return {"type": VALUE_CMDS[cmd], attr: _int(args[0], event), "time": time}
+
+
+def _parse_meta_cmd(cmd: str, rest: str, args: List[str], time: int, event: Any) -> Dict[str, Any]:
+    attrs = META_ATTRS[cmd]
+    if cmd in STRING_META_TYPES:
+        return {"type": cmd, attrs[0]: rest, "time": time}
+    if cmd == "sequencer_specific":
+        return {"type": cmd, "data": [_int(a, event) for a in args], "time": time}
+    if len(args) != len(attrs):
+        raise ValueError(
+            f"dense: command {cmd!r} takes {len(attrs)} values ({', '.join(attrs)}) in event {event!r}"
+        )
+    values = [_int(a, event) for a in args]
+    return {"type": cmd, "time": time, **dict(zip(attrs, values))}
+
+
+def _parse_channel_cmd(
+    cmd: str, args: List[str], time: int, event: Any, default_channel: int
+) -> Dict[str, Any]:
+    channel = default_channel
+    if args and args[-1].startswith("@"):
+        channel = _int(args[-1][1:], event)
+        args = args[:-1]
+    msg_type, attrs = CHANNEL_CMDS[cmd]
+    min_args = len(attrs) - (1 if cmd == "off" else 0)
+    if not min_args <= len(args) <= len(attrs):
+        raise ValueError(f"dense: command {cmd!r} takes {' and '.join(attrs)} in event {event!r}")
+    values = [
+        note2key(arg) if i == 0 and cmd in ("on", "off") else _int(arg, event)
+        for i, arg in enumerate(args)
+    ]
+    if cmd == "off" and len(values) < len(attrs):
+        values.append(0)  # default release velocity
+    return {"type": msg_type, "time": time, "channel": channel, **dict(zip(attrs, values))}
+
+
 def _parse_event(event: Any, default_channel: int) -> Dict[str, Any]:
     """Parse one dense event string into a raw message dict."""
     tokens = str(event).split(None, 2)
@@ -96,40 +137,13 @@ def _parse_event(event: Any, default_channel: int) -> Dict[str, Any]:
         return {"type": TEXT_CMDS[cmd], "text": rest, "time": time}
 
     if cmd in VALUE_CMDS:
-        if len(args) != 1:
-            raise ValueError(f"dense: command {cmd!r} takes one integer value in event {event!r}")
-        attr = META_ATTRS[VALUE_CMDS[cmd]][0]
-        return {"type": VALUE_CMDS[cmd], attr: _int(args[0], event), "time": time}
+        return _parse_value_cmd(cmd, args, time, event)
 
     if cmd in META_ATTRS:
-        attrs = META_ATTRS[cmd]
-        if cmd in STRING_META_TYPES:
-            return {"type": cmd, attrs[0]: rest, "time": time}
-        if cmd == "sequencer_specific":
-            return {"type": cmd, "data": [_int(a, event) for a in args], "time": time}
-        if len(args) != len(attrs):
-            raise ValueError(
-                f"dense: command {cmd!r} takes {len(attrs)} values ({', '.join(attrs)}) in event {event!r}"
-            )
-        values = [_int(a, event) for a in args]
-        return {"type": cmd, "time": time, **dict(zip(attrs, values))}
+        return _parse_meta_cmd(cmd, rest, args, time, event)
 
     if cmd in CHANNEL_CMDS:
-        channel = default_channel
-        if args and args[-1].startswith("@"):
-            channel = _int(args[-1][1:], event)
-            args = args[:-1]
-        msg_type, attrs = CHANNEL_CMDS[cmd]
-        min_args = len(attrs) - (1 if cmd == "off" else 0)
-        if not min_args <= len(args) <= len(attrs):
-            raise ValueError(f"dense: command {cmd!r} takes {' and '.join(attrs)} in event {event!r}")
-        values = [
-            note2key(arg) if i == 0 and cmd in ("on", "off") else _int(arg, event)
-            for i, arg in enumerate(args)
-        ]
-        if cmd == "off" and len(values) < len(attrs):
-            values.append(0)  # default release velocity
-        return {"type": msg_type, "time": time, "channel": channel, **dict(zip(attrs, values))}
+        return _parse_channel_cmd(cmd, args, time, event, default_channel)
 
     raise ValueError(f"dense: unknown event command {cmd!r} in {event!r}")
 
