@@ -1,4 +1,5 @@
 """Dense YAML representation: compact, human-readable MIDI serialization."""
+from collections import Counter
 from typing import Any, Dict, List
 
 from ..utils import note2key, key2note
@@ -31,7 +32,9 @@ STRING_META_TYPES = {
 }
 
 # Dense event command -> (mido message type, attribute names).
-CHANNEL_CMDS = {
+# The dense command is a short code (e.g., "on" for note_on), and the tuple contains the
+# corresponding mido message type and the order of dense attributes.
+CHANNEL_EVENTS_CMDS = {
     "on": ("note_on", ("note", "velocity")),
     "off": ("note_off", ("note", "velocity")),
     "pt": ("polytouch", ("note", "value")),
@@ -40,23 +43,26 @@ CHANNEL_CMDS = {
     "at": ("aftertouch", ("value",)),
     "pw": ("pitchwheel", ("pitch",)),
 }
-CMD_BY_TYPE = {msg_type: cmd for cmd, (msg_type, _) in CHANNEL_CMDS.items()}
+# Reverse mapping: mido channel message type -> dense event command.
+CMD_BY_TYPE = {msg_type: cmd for cmd, (msg_type, _) in CHANNEL_EVENTS_CMDS.items()}
 
-# Dense event command -> mido meta type (text is taken verbatim from the rest of the line).
+# Dense event command -> mido meta type for text-based messages.
 TEXT_CMDS = {
     "text": "text",
     "copyright": "copyright",
-    "lyric": "lyrics",
+    "lyrics": "lyrics",
     "marker": "marker",
     "cue": "cue_marker",
 }
+# Reverse mapping: mido text meta type -> dense event command.
 CMD_BY_TEXT_TYPE = {meta_type: cmd for cmd, meta_type in TEXT_CMDS.items()}
 
-# Dense event command -> meta type whose single (integer) attribute is stored verbatim.
-VALUE_CMDS = {
+# Dense event command -> meta type whose single integer attribute is stored verbatim.
+INTEGER_CMDS = {
     "port": "midi_port",
 }
-VALUE_CMD_BY_TYPE = {meta_type: cmd for cmd, meta_type in VALUE_CMDS.items()}
+# Reverse mapping: mido integer meta type -> dense event command.
+VALUE_CMD_BY_TYPE = {meta_type: cmd for cmd, meta_type in INTEGER_CMDS.items()}
 
 
 def _int(token: str, event: str) -> int:
@@ -78,11 +84,14 @@ def _format_meta_event(time: int, msg: Dict[str, Any]) -> str:
     return f"{time} {meta_type} " + " ".join(str(v) for v in values)
 
 
+############################
+# Internal parse functions #
+
 def _parse_value_cmd(cmd: str, args: List[str], time: int, event: Any) -> Dict[str, Any]:
     if len(args) != 1:
         raise ValueError(f"dense: command {cmd!r} takes one integer value in event {event!r}")
-    attr = META_ATTRS[VALUE_CMDS[cmd]][0]
-    return {"type": VALUE_CMDS[cmd], attr: _int(args[0], event), "time": time}
+    attr = META_ATTRS[INTEGER_CMDS[cmd]][0]
+    return {"type": INTEGER_CMDS[cmd], attr: _int(args[0], event), "time": time}
 
 
 def _parse_meta_cmd(cmd: str, rest: str, args: List[str], time: int, event: Any) -> Dict[str, Any]:
@@ -98,28 +107,55 @@ def _parse_meta_cmd(cmd: str, rest: str, args: List[str], time: int, event: Any)
     values = [_int(a, event) for a in args]
     return {"type": cmd, "time": time, **dict(zip(attrs, values))}
 
+def _parse_note_cmd(
+    cmd: str, args: List[str], time: int, event: Any,
+    channel: int, default_velocity: int,
+) -> Dict[str, Any]:
+    if not 1 <= len(args) <= 2:
+        raise ValueError(
+            f"dense: command {cmd!r} takes a note and optional !velocity in event {event!r}"
+        )
+    note = note2key(args[0])
+    if len(args) == 1:
+        velocity = default_velocity if cmd == "on" else 0
+    else:
+        if not args[1].startswith("!") or len(args[1]) == 1:
+            raise ValueError(
+                f"dense: velocity must use ! prefix followed by a number in event {event!r}, got {args[1]!r}"
+            )
+        velocity = _int(args[1][1:], event)
+    return {
+        "type": "note_on" if cmd == "on" else "note_off",
+        "time": time,
+        "channel": channel,
+        "note": note,
+        "velocity": velocity,
+    }
 
 def _parse_channel_cmd(
-    cmd: str, args: List[str], time: int, event: Any, default_channel: int
+    cmd: str, args: List[str], time: int, event: Any,
+    default_channel: int, default_velocity: int|None,
 ) -> Dict[str, Any]:
     channel = default_channel
     if args and args[-1].startswith("@"):
         channel = _int(args[-1][1:], event)
         args = args[:-1]
-    msg_type, attrs = CHANNEL_CMDS[cmd]
-    min_args = len(attrs) - (1 if cmd == "off" else 0)
+
+    if cmd in ("on", "off"):
+        if default_velocity is None:
+            raise ValueError(f"dense: got velocity event {event} without a default velocity")
+        return _parse_note_cmd(cmd, args, time, event, channel, default_velocity)
+
+    msg_type, attrs = CHANNEL_EVENTS_CMDS[cmd]
+    min_args = len(attrs)
     if not min_args <= len(args) <= len(attrs):
         raise ValueError(f"dense: command {cmd!r} takes {' and '.join(attrs)} in event {event!r}")
-    values = [
-        note2key(arg) if i == 0 and cmd in ("on", "off") else _int(arg, event)
-        for i, arg in enumerate(args)
-    ]
-    if cmd == "off" and len(values) < len(attrs):
-        values.append(0)  # default release velocity
+
+    values = [_int(arg, event) for arg in args]
     return {"type": msg_type, "time": time, "channel": channel, **dict(zip(attrs, values))}
 
 
-def _parse_event(event: Any, default_channel: int) -> Dict[str, Any]:
+def _parse_event(event: Any, default_channel: int, default_velocity: int|None) -> Dict[str, Any]:
     """Parse one dense event string into a raw message dict."""
     tokens = str(event).split(None, 2)
     if len(tokens) < 2:
@@ -136,17 +172,20 @@ def _parse_event(event: Any, default_channel: int) -> Dict[str, Any]:
     if cmd in TEXT_CMDS:
         return {"type": TEXT_CMDS[cmd], "text": rest, "time": time}
 
-    if cmd in VALUE_CMDS:
+    if cmd in INTEGER_CMDS:
         return _parse_value_cmd(cmd, args, time, event)
 
     if cmd in META_ATTRS:
         return _parse_meta_cmd(cmd, rest, args, time, event)
 
-    if cmd in CHANNEL_CMDS:
-        return _parse_channel_cmd(cmd, args, time, event, default_channel)
+    if cmd in CHANNEL_EVENTS_CMDS:
+        return _parse_channel_cmd(cmd, args, time, event, default_channel, default_velocity)
 
     raise ValueError(f"dense: unknown event command {cmd!r} in {event!r}")
 
+
+##############
+# Conversion #
 
 def dense_to_raw(data: Dict[str, Any]) -> Dict[str, Any]:
     """Convert a dense dictionary into a raw dictionary (see Mir.to_dict)."""
@@ -157,8 +196,11 @@ def dense_to_raw(data: Dict[str, Any]) -> Dict[str, Any]:
     for track in data.get("tracks") or []:
         if not isinstance(track, dict):
             raise ValueError("dense: each entry of 'tracks' must be a mapping")
-        default_channel = track.get("channel", 0)
-        msgs = [_parse_event(event, default_channel) for event in (track.get("events") or [])]
+        if "channel" not in track:
+            raise ValueError("dense: missing required key 'channel' in track")
+        default_channel = track["channel"]
+        default_velocity = track.get("velocity", None)
+        msgs = [_parse_event(event, default_channel, default_velocity) for event in (track.get("events") or [])]
         tracks.append(msgs)
 
     return {
@@ -184,6 +226,14 @@ def raw_to_dense(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def _raw_to_dense_track(track: List[Dict[str, Any]]) -> Dict[str, Any]:
     default_channel = next((msg["channel"] for msg in track if msg["type"] in CMD_BY_TYPE), 0)
+
+    velocity_pair = Counter(
+        msg["velocity"]
+        for msg in track
+        if msg["type"] == "note_on" and "velocity" in msg
+    ).most_common(1)
+    default_velocity = velocity_pair[0][0] if velocity_pair else None
+
     events = []
     for msg in track:
         time = msg["time"]
@@ -201,11 +251,21 @@ def _raw_to_dense_track(track: List[Dict[str, Any]]) -> Dict[str, Any]:
             events.append(_format_meta_event(time, msg))
         elif meta_type in CMD_BY_TYPE:
             suffix = "" if msg["channel"] == default_channel else f" @{msg['channel']}"
-            if meta_type in ("note_on", "note_off") and msg["velocity"] == 0:
-                events.append(f"{time} off {key2note(msg['note'])}{suffix}")
+            if meta_type in ("note_on", "note_off"):
+                note = key2note(msg["note"])
+                velocity = msg["velocity"]
+                if velocity == 0:
+                    events.append(f"{time} off {note}{suffix}")
+                elif meta_type == "note_on":
+                    if velocity == default_velocity:
+                        events.append(f"{time} on {note}{suffix}")
+                    else:
+                        events.append(f"{time} on {note} !{velocity}{suffix}")
+                else:  # note_off with non-zero velocity
+                    events.append(f"{time} off {note} !{velocity}{suffix}")
             else:
                 cmd = CMD_BY_TYPE[meta_type]
-                attrs = CHANNEL_CMDS[cmd][1]
+                attrs = CHANNEL_EVENTS_CMDS[cmd][1]
                 tokens = [str(time), cmd]
                 for a in attrs:
                     if a == "note" and meta_type in ("note_on", "note_off"):
@@ -215,8 +275,11 @@ def _raw_to_dense_track(track: List[Dict[str, Any]]) -> Dict[str, Any]:
                 events.append(" ".join(tokens) + suffix)
         else:
             raise ValueError(f"dense: cannot store {meta_type!r} events in a track")
+
     out: Dict[str, Any] = {
         "channel": default_channel,
         "events": events,
     }
+    if default_velocity is not None:
+        out["velocity"] = default_velocity
     return out
