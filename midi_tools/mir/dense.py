@@ -1,5 +1,7 @@
 """Dense YAML representation: compact, human-readable MIDI serialization."""
+
 from collections import Counter
+from types import SimpleNamespace
 from typing import Any, Dict, List
 
 from ..utils import note2key, key2note
@@ -108,8 +110,13 @@ def _parse_meta_cmd(cmd: str, rest: str, args: List[str], time: int, event: Any)
     return {"type": cmd, "time": time, **dict(zip(attrs, values))}
 
 def _parse_note_cmd(
-    cmd: str, args: List[str], time: int, event: Any,
-    channel: int, default_velocity: int,
+    cmd: str,
+    args: List[str],
+    time: int,
+    event: Any,
+    channel: int,
+    default_velocity_on: int | None,
+    default_velocity_off: int | None,
 ) -> Dict[str, Any]:
     if not 1 <= len(args) <= 2:
         raise ValueError(
@@ -117,7 +124,7 @@ def _parse_note_cmd(
         )
     note = note2key(args[0])
     if len(args) == 1:
-        velocity = default_velocity if cmd == "on" else 0
+        velocity = default_velocity_on if cmd == "on" else default_velocity_off
     else:
         if not args[1].startswith("!") or len(args[1]) == 1:
             raise ValueError(
@@ -133,8 +140,13 @@ def _parse_note_cmd(
     }
 
 def _parse_channel_cmd(
-    cmd: str, args: List[str], time: int, event: Any,
-    default_channel: int, default_velocity: int|None,
+    cmd: str,
+    args: List[str],
+    time: int,
+    event: Any,
+    default_channel: int,
+    default_velocity_on: int | None,
+    default_velocity_off: int | None,
 ) -> Dict[str, Any]:
     channel = default_channel
     if args and args[-1].startswith("@"):
@@ -142,9 +154,19 @@ def _parse_channel_cmd(
         args = args[:-1]
 
     if cmd in ("on", "off"):
-        if default_velocity is None:
-            raise ValueError(f"dense: got velocity event {event} without a default velocity")
-        return _parse_note_cmd(cmd, args, time, event, channel, default_velocity)
+        if default_velocity_on is None and cmd == "on":
+            raise ValueError(
+                f"dense: got velocity event {event} without a default velocity_on"
+            )
+        return _parse_note_cmd(
+            cmd,
+            args,
+            time,
+            event,
+            channel,
+            default_velocity_on,
+            default_velocity_off,
+        )
 
     msg_type, attrs = CHANNEL_EVENTS_CMDS[cmd]
     min_args = len(attrs)
@@ -155,7 +177,12 @@ def _parse_channel_cmd(
     return {"type": msg_type, "time": time, "channel": channel, **dict(zip(attrs, values))}
 
 
-def _parse_event(event: Any, default_channel: int, default_velocity: int|None) -> Dict[str, Any]:
+def _parse_event(
+    event: Any,
+    default_channel: int,
+    default_velocity_on: int | None,
+    default_velocity_off: int | None,
+) -> Dict[str, Any]:
     """Parse one dense event string into a raw message dict."""
     tokens = str(event).split(None, 2)
     if len(tokens) < 2:
@@ -179,7 +206,10 @@ def _parse_event(event: Any, default_channel: int, default_velocity: int|None) -
         return _parse_meta_cmd(cmd, rest, args, time, event)
 
     if cmd in CHANNEL_EVENTS_CMDS:
-        return _parse_channel_cmd(cmd, args, time, event, default_channel, default_velocity)
+        return _parse_channel_cmd(
+            cmd, args, time, event, default_channel,
+            default_velocity_on, default_velocity_off,
+        )
 
     raise ValueError(f"dense: unknown event command {cmd!r} in {event!r}")
 
@@ -199,8 +229,12 @@ def dense_to_raw(data: Dict[str, Any]) -> Dict[str, Any]:
         if "channel" not in track:
             raise ValueError("dense: missing required key 'channel' in track")
         default_channel = track["channel"]
-        default_velocity = track.get("velocity", None)
-        msgs = [_parse_event(event, default_channel, default_velocity) for event in (track.get("events") or [])]
+        default_velocity_on = track.get("velocity_on")
+        default_velocity_off = track.get("velocity_off", 0)
+        msgs = [
+            _parse_event(event, default_channel, default_velocity_on, default_velocity_off)
+            for event in (track.get("events") or [])
+        ]
         tracks.append(msgs)
 
     return {
@@ -226,13 +260,22 @@ def raw_to_dense(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def _raw_to_dense_track(track: List[Dict[str, Any]]) -> Dict[str, Any]:
     default_channel = next((msg["channel"] for msg in track if msg["type"] in CMD_BY_TYPE), 0)
+    velocities = SimpleNamespace(note_on=Counter(), note_off=Counter())
 
-    velocity_pair = Counter(
-        msg["velocity"]
-        for msg in track
-        if msg["type"] == "note_on" and "velocity" in msg
-    ).most_common(1)
-    default_velocity = velocity_pair[0][0] if velocity_pair else None
+    for msg in track:
+        msg_type = msg["type"]
+        if msg_type not in ("note_on", "note_off"):
+            continue
+
+        velocity = msg["velocity"]
+
+        if velocity == 0 and msg_type == 'note_on':
+            msg_type = 'note_off'
+
+        getattr(velocities, msg_type)[velocity] += 1
+
+    default_velocity_on = velocities.note_on.most_common(1)[0][0] if velocities.note_on else None
+    default_velocity_off = velocities.note_off.most_common(1)[0][0] if velocities.note_off else 0
 
     events = []
     for msg in track:
@@ -251,17 +294,21 @@ def _raw_to_dense_track(track: List[Dict[str, Any]]) -> Dict[str, Any]:
             events.append(_format_meta_event(time, msg))
         elif meta_type in CMD_BY_TYPE:
             suffix = "" if msg["channel"] == default_channel else f" @{msg['channel']}"
-            if meta_type in ("note_on", "note_off"):
+            if meta_type == "note_on":
                 note = key2note(msg["note"])
                 velocity = msg["velocity"]
                 if velocity == 0:
                     events.append(f"{time} off {note}{suffix}")
-                elif meta_type == "note_on":
-                    if velocity == default_velocity:
-                        events.append(f"{time} on {note}{suffix}")
-                    else:
-                        events.append(f"{time} on {note} !{velocity}{suffix}")
-                else:  # note_off with non-zero velocity
+                elif velocity == default_velocity_on:
+                    events.append(f"{time} on {note}{suffix}")
+                else:
+                    events.append(f"{time} on {note} !{velocity}{suffix}")
+            elif meta_type == "note_off":
+                note = key2note(msg["note"])
+                velocity = msg["velocity"]
+                if velocity == default_velocity_off:
+                    events.append(f"{time} off {note}{suffix}")
+                else:
                     events.append(f"{time} off {note} !{velocity}{suffix}")
             else:
                 cmd = CMD_BY_TYPE[meta_type]
@@ -280,6 +327,7 @@ def _raw_to_dense_track(track: List[Dict[str, Any]]) -> Dict[str, Any]:
         "channel": default_channel,
         "events": events,
     }
-    if default_velocity is not None:
-        out["velocity"] = default_velocity
+    if default_velocity_on is not None or default_velocity_off != 0:
+        out["velocity_on"] = default_velocity_on
+        out["velocity_off"] = default_velocity_off
     return out
