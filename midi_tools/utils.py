@@ -29,7 +29,7 @@ def note2key(name: str) -> int:
     """Convert a note name to a MIDI key number.
 
     Uses the convention of middle C as C4, so note_to_key("C4") == 60.
-    Accepts names like C4, C#4, Db4.
+    Accepts names like C4, C#4.
     """
     s = name.strip()
     if not s:
@@ -47,8 +47,9 @@ def note2key(name: str) -> int:
         accidental = 1
         rest = rest[1:]
     elif rest.startswith("b"):
-        accidental = -1
-        rest = rest[1:]
+        raise ValueError(f"note2key: flat notes are not allowed, accidentals should only be expressed with #")
+        # accidental = -1
+        # rest = rest[1:]
 
     try:
         octave = int(rest)
