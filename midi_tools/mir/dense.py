@@ -1,5 +1,6 @@
 """Dense YAML representation: compact, human-readable MIDI serialization."""
 
+import warnings
 from collections import Counter, defaultdict, deque
 from types import SimpleNamespace
 from typing import Any, Dict, List
@@ -385,6 +386,27 @@ def _raw_to_dense_track(track: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     for index, absolute_tick, msg in absolute_messages:
         msg_type = msg["type"]
+
+        if msg_type == "end_of_track":
+            pending_count = sum(len(queue) for queue in pending.values())
+            if pending_count:
+                for key, queue in pending.items():
+                    while queue:
+                        onset_index, onset_tick, onset_msg = queue.popleft()
+                        paired_notes[onset_index] = {
+                            "onset_tick": onset_tick,
+                            "onset_msg": onset_msg,
+                            "duration": absolute_tick - onset_tick,
+                            "off_velocity": 0,
+                        }
+                warnings.warn(
+                    f"end_of_track at tick {absolute_tick} implicitly closed "
+                    f"{pending_count} pending note(s)",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            continue
+
         if msg_type == "note_on" and msg["velocity"] > 0:
             pending[(msg["channel"], msg["note"])].append((index, absolute_tick, msg))
             continue
