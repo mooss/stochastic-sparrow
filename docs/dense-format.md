@@ -84,7 +84,8 @@ Additional notes:
  - Fused note events do not start with a delta time, unlike all other events.
    Their `onset_delta` is the third token, after `at`.
  - A fused note's duration does not advance the input-event timing cursor.
-   The next event's delta is measured from this note's onset, not its note-off.
+   The timing cursor is advanced by the value of `onset_delta`.
+   For instance the event `C4 at 20 for 480` advances the timing cursor of 20, not of 480 and not of 500.
  - Parsing expands fused notes into MIDI messages and sorts the resulting messages by time.
  - Fused notes always use note names, never key numbers (like `127`), even on drum tracks.
 
