@@ -7,7 +7,7 @@ from typing import Optional, Sequence
 from .conversion import convert
 from .mir import Mir
 from .cmd.roundtrip import roundtrip
-from .squeeze import squeeze_notes
+from .squeeze import squeeze_intervals, squeeze_notes
 
 ################
 # Registration #
@@ -28,13 +28,8 @@ def register_conv(sub):
     p_conv = sub.add_parser("conv", help="Convert between MIDI and YAML based on file extensions")
     p_conv.add_argument("input_file")
     p_conv.add_argument("output_file")
-    p_conv.add_argument(
-        "--format",
-        type=int,
-        choices=[0, 1],
-        default=1,
-        help="MIDI format/type of the output MIDI file (default: 1, 2 is not supported)",
-    )
+    p_conv.add_argument("--format", type=int, choices=[0, 1], default=1,
+                        help="MIDI format/type of the output MIDI file (default: 1, 2 is not supported)")
 
 
 def register_squeeze(sub):
@@ -42,18 +37,18 @@ def register_squeeze(sub):
     squeeze_sub = p_squeeze.add_subparsers(dest="squeeze_command", required=True)
 
     p_notes = squeeze_sub.add_parser("notes", help="Output notes from one track")
-    p_notes.add_argument(
-        "--from",
-        dest="input_file",
-        required=True,
-        help="Input MIDI, .midraw.yaml, or .midense.yaml file",
-    )
-    p_notes.add_argument(
-        "--track",
-        type=int,
-        required=True,
-        help="Zero-based track number",
-    )
+    p_notes.add_argument("--from", dest="input_file", required=True,
+                         help="Input MIDI, .midraw.yaml, or .midense.yaml file")
+    p_notes.add_argument("--track", type=int, required=True,
+                         help="Zero-based track number")
+
+    p_intervals = squeeze_sub.add_parser("intervals", help="Output counts of note intervals from one track")
+    p_intervals.add_argument("--from", dest="input_file", required=True,
+                             help="Input MIDI, .midraw.yaml, or .midense.yaml file")
+    p_intervals.add_argument("--track", type=int, required=True,
+                             help="Zero-based track number")
+    p_intervals.add_argument("--window-size", "-s", type=int, required=True,
+                             help="Number of intervals in each interval window")
 
 
 def register_others(sub):
@@ -84,6 +79,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         elif args.command == "squeeze":
             if args.squeeze_command == "notes":
                 squeeze_notes(Mir.from_disk(args.input_file), args.track)
+            elif args.squeeze_command == "intervals":
+                squeeze_intervals(Mir.from_disk(args.input_file), args.track, args.window_size)
     except (ValueError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
