@@ -1,5 +1,6 @@
 """Various MIDI constants and minor utilities."""
 import io
+import warnings
 from pathlib import Path
 from typing import IO, Union
 
@@ -23,6 +24,7 @@ MIDI_DEFAULT_TIME_SIGNATURE = "4/4"
 
 _NOTE_OFFSETS = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 _NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+_flat_warning_issued = False
 
 
 def note2key(name: str) -> int:
@@ -30,6 +32,8 @@ def note2key(name: str) -> int:
 
     Uses the convention of middle C as C4, so note_to_key("C4") == 60.
     Accepts names like C4, C#4.
+    Flat notes like Db4 are accepted for convenience but discouraged, since accidentals should be
+    expressed with #.
     """
     s = name.strip()
     if not s:
@@ -47,9 +51,16 @@ def note2key(name: str) -> int:
         accidental = 1
         rest = rest[1:]
     elif rest.startswith("b"):
-        raise ValueError(f"note2key: flat notes are not allowed, accidentals should only be expressed with #")
-        # accidental = -1
-        # rest = rest[1:]
+        accidental = -1
+        rest = rest[1:]
+        global _flat_warning_issued
+        if not _flat_warning_issued:
+            warnings.warn(
+                f"note2key: flat notes are discouraged, "
+                f"accidentals should be expressed with # instead: {name!r}",
+                stacklevel=2,
+            )
+            _flat_warning_issued = True
 
     try:
         octave = int(rest)
