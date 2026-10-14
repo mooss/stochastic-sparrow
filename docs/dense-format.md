@@ -85,7 +85,7 @@ Additional notes:
    Their `onset_delta` is the third token, after `at`.
  - A fused note's duration does not advance the input-event timing cursor.
    The timing cursor is advanced by the value of `onset_delta`.
-   For instance the event `C4 at 20 for 480` advances the timing cursor of 20, not of 480 and not of 500.
+   For instance the event `C4 at 20 for 480` advances the timing cursor by 20, not by 480 and not by 500.
  - Parsing expands fused notes into MIDI messages and sorts the resulting messages by time.
  - Fused notes always use note names, never key numbers (like `127`), even on drum tracks.
 
@@ -113,3 +113,7 @@ Additional notes:
    Unknown commands, wrong argument counts, and non-integer values trigger an error.
    An unmatched note-off is an error.
    An unmatched note-on is closed at an `end_of_track` event, with a warning; if there is no such event, it is an error.
+ - **Velocity values:** varying velocities can be used to give character to a track.
+   Not all track need it.
+   96 should be considered standard, 64 is quieter, 32 is hard to hear if there are other notes at the same time and 127 is the maximum.
+   Low velocity should not be used for the whole track, it usefulness is providing contrast or achieve specific effects like making sure that an instrument stays in the background or that the volume ramps up.
