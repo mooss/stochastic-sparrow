@@ -7,7 +7,7 @@ from typing import Optional, Sequence
 from .conversion import convert
 from .mir import Mir
 from .cmd.roundtrip import roundtrip
-from .squeeze import squeeze_intervals, squeeze_notes
+from .squeeze import squeeze_intervals, squeeze_multi_intervals, squeeze_notes
 
 ################
 # Registration #
@@ -36,19 +36,27 @@ def register_squeeze(sub):
     p_squeeze = sub.add_parser("squeeze", help="Extract selected MIDI data")
     squeeze_sub = p_squeeze.add_subparsers(dest="squeeze_command", required=True)
 
-    p_notes = squeeze_sub.add_parser("notes", help="Output notes from one track")
+    p_notes = squeeze_sub.add_parser("notes", help="Sequentially prints notes")
     p_notes.add_argument("--from", dest="input_file", required=True,
                          help="Input MIDI, .midraw.yaml, or .midense.yaml file")
     p_notes.add_argument("--track", type=int, required=True,
                          help="Zero-based track number")
 
-    p_intervals = squeeze_sub.add_parser("intervals", help="Output counts of note intervals from one track")
+    p_intervals = squeeze_sub.add_parser("intervals", help="Print sorted counts of note intervals")
     p_intervals.add_argument("--from", dest="input_file", required=True,
                              help="Input MIDI, .midraw.yaml, or .midense.yaml file")
     p_intervals.add_argument("--track", type=int, required=True,
                              help="Zero-based track number")
     p_intervals.add_argument("--window-size", "-s", type=int, required=True,
                              help="Number of intervals in each interval window")
+
+    p_multinters = squeeze_sub.add_parser("multi-intervals", help="Print sorted counts of note intervals for all window sizes up to max")
+    p_multinters.add_argument("--from", dest="input_file", required=True,
+                              help="Input MIDI, .midraw.yaml, or .midense.yaml file")
+    p_multinters.add_argument("--track", type=int, required=True,
+                              help="Zero-based track number")
+    p_multinters.add_argument("--max-window-size", "-s", type=int, required=True,
+                              help="Maximum number of intervals in each interval window")
 
 
 def register_others(sub):
@@ -81,6 +89,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 squeeze_notes(Mir.from_disk(args.input_file), args.track)
             elif args.squeeze_command == "intervals":
                 squeeze_intervals(Mir.from_disk(args.input_file), args.track, args.window_size)
+            elif args.squeeze_command == "multi-intervals":
+                squeeze_multi_intervals(Mir.from_disk(args.input_file), args.track, args.max_window_size)
     except (ValueError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
