@@ -46,6 +46,7 @@ Note events use the fused note syntax described in [Fused notes](#fused-note-eve
 
 Channels use mido's zero-based numbering: `0`–`15`.
 Events use the track's `channel` by default; append `@N` as the last argument to override it for a single event, e.g. `0 cc 7 100 @3`.
+Pitchwheel value must be between -8192 and 8191.
 
 Note-on and note-off events are represented by the fused note syntax described below.
 
@@ -115,5 +116,6 @@ Additional notes:
    An unmatched note-on is closed at an `end_of_track` event, with a warning; if there is no such event, it is an error.
  - **Velocity values:** varying velocities can be used to give character to a track.
    Not all track need it.
-   96 should be considered standard, 64 is quieter, 32 is hard to hear if there are other notes at the same time and 127 is the maximum.
+   96 should be considered standard, 64 is hard to hear if there are other notes at the same time and 127 is the maximum.
+   Avoid going below 64.
    Low velocity should not be used for the whole track, it usefulness is providing contrast or achieve specific effects like making sure that an instrument stays in the background or that the volume ramps up.
