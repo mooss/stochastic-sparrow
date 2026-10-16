@@ -7,7 +7,7 @@ from typing import Optional, Sequence
 from .conversion import convert
 from .mir import Mir
 from .cmd.roundtrip import roundtrip
-from .squeeze import squeeze_intervals, squeeze_multi_intervals, squeeze_notes
+from .notes import notes_intervals, notes_multi_intervals, notes_single
 
 ################
 # Registration #
@@ -18,7 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     register_conv(sub)
-    register_squeeze(sub)
+    register_notes(sub)
     register_others(sub)
 
     return parser
@@ -32,17 +32,17 @@ def register_conv(sub):
                         help="MIDI format/type of the output MIDI file (default: 1, 2 is not supported)")
 
 
-def register_squeeze(sub):
-    p_squeeze = sub.add_parser("squeeze", help="Extract selected MIDI data")
-    squeeze_sub = p_squeeze.add_subparsers(dest="squeeze_command", required=True)
+def register_notes(sub):
+    p_notes = sub.add_parser("notes", help="Extract note data from MIDI")
+    notes_sub = p_notes.add_subparsers(dest="notes_command", required=True)
 
-    p_notes = squeeze_sub.add_parser("notes", help="Sequentially prints notes")
+    p_notes = notes_sub.add_parser("single", help="Sequentially prints notes")
     p_notes.add_argument("--from", dest="input_file", required=True,
                          help="Input MIDI, .midraw.yaml, or .midense.yaml file")
     p_notes.add_argument("--track", type=int, required=True,
                          help="Zero-based track number")
 
-    p_intervals = squeeze_sub.add_parser("intervals", help="Print sorted counts of note intervals")
+    p_intervals = notes_sub.add_parser("intervals", help="Print sorted counts of note intervals")
     p_intervals.add_argument("--from", dest="input_file", required=True,
                              help="Input MIDI, .midraw.yaml, or .midense.yaml file")
     p_intervals.add_argument("--track", type=int, required=True,
@@ -50,7 +50,7 @@ def register_squeeze(sub):
     p_intervals.add_argument("--window-size", "-s", type=int, required=True,
                              help="Number of intervals in each interval window")
 
-    p_multinters = squeeze_sub.add_parser("multi-intervals", help="Print sorted counts of note intervals for all window sizes up to max")
+    p_multinters = notes_sub.add_parser("multi-intervals", help="Print sorted counts of note intervals for all window sizes up to max")
     p_multinters.add_argument("--from", dest="input_file", required=True,
                               help="Input MIDI, .midraw.yaml, or .midense.yaml file")
     p_multinters.add_argument("--track", type=int, required=True,
@@ -84,13 +84,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         elif args.command == "_test":
             if args.test_command == "conv":
                 roundtrip(args.input_file)
-        elif args.command == "squeeze":
-            if args.squeeze_command == "notes":
-                squeeze_notes(Mir.from_disk(args.input_file), args.track)
-            elif args.squeeze_command == "intervals":
-                squeeze_intervals(Mir.from_disk(args.input_file), args.track, args.window_size)
-            elif args.squeeze_command == "multi-intervals":
-                squeeze_multi_intervals(Mir.from_disk(args.input_file), args.track, args.max_window_size)
+        elif args.command == "notes":
+            if args.notes_command == "single":
+                notes_single(Mir.from_disk(args.input_file), args.track)
+            elif args.notes_command == "intervals":
+                notes_intervals(Mir.from_disk(args.input_file), args.track, args.window_size)
+            elif args.notes_command == "multi-intervals":
+                notes_multi_intervals(Mir.from_disk(args.input_file), args.track, args.max_window_size)
     except (ValueError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

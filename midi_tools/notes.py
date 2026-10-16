@@ -47,13 +47,13 @@ def _count_for_window(keynums: list[int], window_size: int) -> Counter[str]:
     return counts
 
 
-def squeeze_notes(mir: Mir, track_number: int) -> None:
+def notes_single(mir: Mir, track_number: int) -> None:
     """Print the note names from a selected track as a YAML list."""
     keynums = _keynums_from_track(_track_for_number(mir, track_number))
     yaml.safe_dump(list(map(key2note, keynums)), sys.stdout)
 
 
-def squeeze_intervals(mir: Mir, track_number: int, window_size: int) -> None:
+def notes_intervals(mir: Mir, track_number: int, window_size: int) -> None:
     """Print counts of note intervals in sliding windows sorted by decreasing count."""
     if window_size < 1:
         raise ValueError("window size must be at least 1")
@@ -65,7 +65,7 @@ def squeeze_intervals(mir: Mir, track_number: int, window_size: int) -> None:
     yaml.safe_dump(sorted_counts, sys.stdout, sort_keys=False)
 
 
-def squeeze_multi_intervals(mir: Mir, track_number: int, max_window_size: int) -> None:
+def notes_multi_intervals(mir: Mir, track_number: int, max_window_size: int) -> None:
     """Print counts+weight for all window sizes 1..max_window_size sorted by decreasing weight."""
     if max_window_size < 1:
         raise ValueError("max window size must be at least 1")
